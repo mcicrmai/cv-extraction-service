@@ -7,22 +7,25 @@ from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-# 1. Setup
+# 1. Configuration & AI Setup
 load_dotenv()
-GENAI_KEY = os.getenv("GEMINI_API_KEY")
-genai.configure(api_key=GENAI_KEY)
+GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+genai.configure(api_key=GEMINI_KEY)
 
-# Detect working model
+# Find the best working model for your region automatically
 def get_working_model():
-    for m in genai.list_models():
-        if 'generateContent' in m.supported_generation_methods and 'flash' in m.name:
-            return m.name
-    return 'models/gemini-1.5-flash'
+    try:
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods and 'flash' in m.name:
+                return m.name
+    except:
+        pass
+    return 'gemini-1.5-flash' # Fallback
 
 model = genai.GenerativeModel(get_working_model())
 app = FastAPI()
 
-# 2. CORS MIDDLEWARE (Fixes the 405/CORS error for Zoho)
+# 2. FIX FOR 405/CORS ERROR: Allows Zoho to talk to Railway
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -33,12 +36,16 @@ app.add_middleware(
 
 @app.post("/extract")
 async def extract_resume(file: UploadFile = File(...)):
+    # Save PDF temporarily
     temp_filename = f"temp_{file.filename}"
     with open(temp_filename, "wb") as f:
         f.write(await file.read())
+
     try:
+        # Convert PDF to text
         resume_text = pymupdf4llm.to_markdown(temp_filename)
-        
+
+        # 3. YOUR SPECIFIC SINGAPORE RECRUITMENT SCHEMA
         prompt = f"""
         Parse this resume for recruitment purposes. Extract data and return ONLY valid JSON in this exact format:
         {{
@@ -71,16 +78,21 @@ async def extract_resume(file: UploadFile = File(...)):
         Resume Text:
         {resume_text}
         """
-        
+
+        # 4. Generate & Clean JSON
         response = model.generate_content(prompt)
-        clean_json_str = re.sub(r'```json|```', '', response.text).strip()
-        return json.loads(clean_json_str)
+        clean_json = re.sub(r'```json|```', '', response.text).strip()
         
+        return json.loads(clean_json)
+
     except Exception as e:
         return {"error": str(e)}
+
     finally:
-        if os.path.exists(temp_filename): os.remove(temp_filename)
+        # Delete temp file
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
 
 @app.get("/")
 def home():
-    return {"status": "API is live. Use POST /extract to parse resumes."}
+    return {"status": "Live", "endpoint": "/extract", "method": "POST"}
