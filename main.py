@@ -7,12 +7,12 @@ from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-# 1. Configuration & AI Setup
+# 1. Setup & AI Configuration
 load_dotenv()
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_KEY)
 
-# Find the best working model for your region automatically
+# Auto-detect the best working model for your region
 def get_working_model():
     try:
         for m in genai.list_models():
@@ -20,32 +20,32 @@ def get_working_model():
                 return m.name
     except:
         pass
-    return 'gemini-1.5-flash' # Fallback
+    return 'gemini-1.5-flash'
 
 model = genai.GenerativeModel(get_working_model())
 app = FastAPI()
 
-# 2. FIX FOR 405/CORS ERROR: Allows Zoho to talk to Railway
+# 2. CORS MIDDLEWARE - This fixes the 405 error in Zoho Widget
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Allows Zoho domains to talk to Railway
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "OPTIONS"], # OPTIONS is required for Zoho pre-flight
     allow_headers=["*"],
 )
 
 @app.post("/extract")
 async def extract_resume(file: UploadFile = File(...)):
-    # Save PDF temporarily
+    # Save the uploaded PDF temporarily
     temp_filename = f"temp_{file.filename}"
     with open(temp_filename, "wb") as f:
         f.write(await file.read())
 
     try:
-        # Convert PDF to text
+        # Convert PDF to Markdown text
         resume_text = pymupdf4llm.to_markdown(temp_filename)
 
-        # 3. YOUR SPECIFIC SINGAPORE RECRUITMENT SCHEMA
+        # 3. Your Specific Singapore Recruitment Schema
         prompt = f"""
         Parse this resume for recruitment purposes. Extract data and return ONLY valid JSON in this exact format:
         {{
@@ -79,7 +79,7 @@ async def extract_resume(file: UploadFile = File(...)):
         {resume_text}
         """
 
-        # 4. Generate & Clean JSON
+        # 4. Generate AI response and clean JSON
         response = model.generate_content(prompt)
         clean_json = re.sub(r'```json|```', '', response.text).strip()
         
@@ -89,10 +89,10 @@ async def extract_resume(file: UploadFile = File(...)):
         return {"error": str(e)}
 
     finally:
-        # Delete temp file
+        # Always delete the temporary file
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
 
 @app.get("/")
 def home():
-    return {"status": "Live", "endpoint": "/extract", "method": "POST"}
+    return {"status": "Online", "endpoint": "/extract", "method": "POST"}
